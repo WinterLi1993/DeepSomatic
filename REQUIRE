@@ -1,0 +1,5 @@
+julia 0.5
+HDF5
+StatsBase
+PyCall
+Libz
