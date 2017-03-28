@@ -93,6 +93,10 @@ prt(io::IO, xs...) = begin
     end
 end
 
+import Base.eachline
+
+eachline(f::Function, x) = (f(x) for x in eachline(x))
+
 import Base: map, map!, min, max, conv
 export Δ, groupby, level_to_edge
 
