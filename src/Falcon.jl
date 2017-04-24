@@ -28,7 +28,6 @@ module Falcon
 using OhMyJulia
 using StatsBase
 using Libz
-using BioDataStructures
 import Base: start, next, done, iteratorsize, eltype, view,
              getindex, setindex!, show, ==, hash, write
 
@@ -385,7 +384,7 @@ tagtype(::Integer) = Byte('i')
 tagtype(::Float32) = Byte('f')
 tagtype(::String)  = Byte('Z')
 
-export Bam, BamLoader
+export BamLoader
 
 abstract AbstractBam
 
@@ -422,62 +421,5 @@ iteratorsize(::Type{BamLoader}) = Base.SizeUnknown()
 eltype(::Type{BamLoader})       = Read
 
 show(io::IO, bl::BamLoader) = show(io, "BamLoader($(bl.file))")
-
-immutable Bam <: AbstractBam
-    file::AbstractString
-    header_chunk::Bytes
-    refs::Vector{Tuple{String, i32}}
-    reads::Vector{Read}
-end
-
-Bam(file::AbstractString) = let bl = BamLoader(file)
-    Bam(bl.file, bl.header_chunk, bl.refs, collect(bl))
-end
-
-start(bam::Bam)           = start(bam.reads)
-next(bam::Bam, x)         = next(bam.reads, x)
-done(bam::Bam, x)         = done(bam.reads, x)
-iteratorsize(::Type{Bam}) = iteratorsize(Vector{Read})
-eltype(::Type{Bam})       = eltype(Vector{Read})
-
-show(io::IO, bam::Bam) = show(io, "Bam($(bam.file))")
-
-export fast_pair!
-
-"only find mates for primary reads (flag & 0x900 == 0)"
-function fast_pair!(bam::Bam)
-    namedict = Dict{String, Read}()
-    for r in bam.reads
-        r.flag & 0x900 == 0 || continue
-        if r.qname in keys(namedict)
-            r.mate = namedict[r.qname]
-            namedict[r.qname].mate = r
-            delete!(namedict, r.qname)
-        else
-            namedict[r.qname] = r
-        end
-    end
-    bam
-end
-
-export make_index
-
-function make_index(bam::AbstractBam)
-    index = Dict{String, IntRangeDict{i32, i32}}()
-    chr = -2
-    local dict::IntRangeDict{i32, i32}
-    for (idx, read) in enumerate(bam) @when read.refID >= 0
-        if read.refID != chr
-            chr = read.refID
-            index[bam.refs[chr+1] |> car] = dict = IntRangeDict{i32, i32}()
-        end
-
-        start = read.pos |> i32
-        stop = read.pos + calc_distance(read) - 1 |> i32
-
-        push!(dict[start:stop], i32(idx))
-    end
-    index
-end
 
 end # module

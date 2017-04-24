@@ -187,7 +187,7 @@ function conv(f::Function, A::Vector; kernel::Int=2, stride::Int=1, ret_t::Type=
     A′
 end
 
-export @~, @i_str, @with, @when
+export @~, @i_str, @with, @when, @unless
 
 function curring_call_trans(acc, rest)
     isempty(rest) && return acc
@@ -244,5 +244,10 @@ end
 macro when(exp)
     :( !$(esc(exp)) && continue )
 end
+
+macro unless(exp)
+    :( $(esc(exp)) && continue )
+end
+
 
 end

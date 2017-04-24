@@ -12,22 +12,10 @@ const model = let
     input = Keras.Input(shape=(256, 64, 10))
 
     output = input |>
-        Keras.Convolution2D(32, 5, 5, activation="relu", border_mode="same")  |>
-        Keras.MaxPooling2D((2, 2), strides=(2, 2)) |>
-
-        Keras.Convolution2D(64, 5, 5, activation="relu", border_mode="same") |>
-        Keras.MaxPooling2D((2, 2), strides=(2, 2)) |>
-
-        Keras.Convolution2D(128, 3, 3, activation="relu", border_mode="same") |>
-        Keras.MaxPooling2D((2, 2), strides=(2, 2)) |>
-
-        Keras.Convolution2D(256, 5, 1, activation="relu", border_mode="same") |>
-        Keras.Convolution2D(256, 1, 5, activation="relu", border_mode="same") |>
-        Keras.MaxPooling2D((4, 1), strides=(4, 1)) |>
-
-        Keras.Convolution2D(256, 3, 3, activation="relu", border_mode="same") |>
-        Keras.MaxPooling2D((2, 2), strides=(2, 2)) |>
-
+        Keras.Convolution2D(64, 64, 1, activation="relu", border_mode="valid") |>
+        Keras.Convolution2D(64,  1, 1, activation="relu", border_mode="valid") |>
+        Keras.Convolution2D(64,  1, 5, activation="relu", border_mode="same")  |>
+        Keras.MaxPooling2D((1, 4), strides=(1, 4)) |>
         Keras.Flatten() |>
         Keras.Dense(256, activation="sigmoid") |>
         Keras.Dense(1, activation="sigmoid")
@@ -35,9 +23,9 @@ const model = let
     Keras.Model(input=input, output=output)
 end
 
-const callbacks = [Keras.ModelCheckpoint("simple_cnn_weight.{epoch:02d}-{val_acc:.4f}.h5", monitor="val_acc", save_weights_only=true)]
+const callbacks = [Keras.ModelCheckpoint("cnn2_weight.{epoch:02d}-{val_acc:.4f}.h5", monitor="val_acc", save_weights_only=true)]
 
-const phase_one = readdir(".") ~ filter(x->startswith(x, "simple_cnn_weight.14"))
+const phase_one = readdir(".") ~ filter(x->startswith(x, "cnn2.weight.14"))
 
 function prepare_data()
     images  = readdir(".") ~ filter(x->endswith(x, ".image")) ~ map(i"1:end-6")
@@ -70,7 +58,7 @@ function prepare_data()
     X = [map(car, results)...;]
     y = [map(cadr, results)...;]
 
-    h5open("simple_cnn_data.h5", "w") do f
+    h5open("cnn2_data.h5", "w") do f
         write(f, "X", X)
         write(f, "y", y)
     end
@@ -79,8 +67,8 @@ function prepare_data()
 end
 
 @main function train()
-    if isfile("simple_cnn_data.h5")
-        X, y = h5open("simple_cnn_data.h5") do f
+    if isfile("cnn2_data.h5")
+        X, y = h5open("cnn2_data.h5") do f
             read(f, "X"), read(f, "y")
         end
     else

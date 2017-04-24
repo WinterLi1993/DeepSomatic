@@ -35,23 +35,38 @@ function most_significant_mut_count(seq)
     maximum(counter)
 end
 
-function read_gdna(f)
-    channel = Channel{Tuple{String, i32, i32}}(32)
-    @schedule begin
-        for line in eachline(split, f)
-            depth = parse(Int, line[4])
+function get_chr_anchors(f)
+    chr, anchors = "__invalid__", Dict{String, Int}()
+    while !eof(f)
+        p = position(f)
+        line = readline(f)
+        startswith(line, chr) && continue
+        chr = line[1:findfirst(line, '\t')]
+        anchors[chr[1:end-1]] = p
+    end
+    anchors
+end
 
-            if depth > 80
-                freq = most_significant_mut_count(line[5]) / depth
+function read_gdna(f, chr)
+    channel = Channel{Tuple{i32, i32}}(32)
+    @schedule while true
+        line = readline(f) |> split
 
-                if freq < .01
-                    put!(channel, (line[1], parse(i32, line[2]), 0))
-                elseif freq > .24 || (depth > 200 && freq > .2)
-                    put!(channel, (line[1], parse(i32, line[2]), 1))
-                end
+        line[1] == chr || return close(channel)
+
+        depth = parse(Int, line[4])
+
+        if depth > 80
+            freq = most_significant_mut_count(line[5]) / depth
+
+            if freq < .01 && rand(Bool) # drop some to balance the label
+                put!(channel, (parse(i32, line[2]), 0))
+            elseif freq > .24 || (depth > 200 && freq > .2)
+                put!(channel, (parse(i32, line[2]), 1))
             end
         end
-        close(channel)
+
+        eof(f) && return close(channel)
     end
     channel
 end
@@ -69,10 +84,24 @@ function decode_base(b)::Byte
     base_code[b+1]
 end
 
-function read_cfdna(f)
-    bam = Bam(f)
-    index = make_index(bam)
-    bam, index
+function next_chromosome(bam::BamLoader)
+    chr, reads, index = -1, Read[], IntRangeDict{i32, i32}()
+
+    for (idx, read) in enumerate(bam) @when read.refID >= 0
+        if chr == -1
+            chr = read.refID
+        elseif chr != read.refID
+            break # loss a read here, but it doesn't matter
+        end
+
+        start = read.pos |> i32
+        stop = read.pos + calc_distance(read) - 1 |> i32
+
+        push!(reads, read)
+        push!(index[start:stop], i32(length(reads)))
+    end
+
+    reads, index
 end
 
 """
@@ -104,7 +133,7 @@ function encode_read(read, center)
         alt = encode_base(read.seq[relpos])
         if alt != 0
             image[offset, alt] = min(read.qual[relpos], 60) / 60
-            image[offset, alt + 6] = 1.
+            image[offset, encode_base(ref) + 6] = 1.
         end
     end
 
@@ -155,46 +184,51 @@ function encode_read(read, center)
 end
 
 @main function collect_data(bam, pileup, image, txt)
-    taskname = basename(bam)
+    pileup, out_image, out_txt = open(pileup), open(image, "w"), open(txt, "w")
+    bam = BamLoader(bam)
+    anchors = get_chr_anchors(pileup)
 
-    prt(STDERR, now(), taskname, "start reading bam"); flush(STDERR)
-    bam, index = read_cfdna(bam)
+    while !eof(bam.handle)
+        all_reads, index = next_chromosome(bam)
+        chr = car(bam.refs[all_reads[1].refID + 1])
 
-    out_image, out_txt = open(image, "w"), open(txt, "w")
+        chr in keys(anchors) ? seek(pileup, anchors[chr]) : continue
 
-    prt(STDERR, now(), taskname, "start hijinking"); flush(STDERR)
-    for (chr, pos, genotype) in read_gdna(pileup)
-        reads = index[chr][pos]
-        depth = length(reads)
-        depth < 64 && continue
+        for (pos, genotype) in read_gdna(pileup, chr)
+            reads = index[pos]
+            depth = length(reads)
+            depth < 64 && continue
 
-        reads = bam.reads[reads]
-        images = map(x->encode_read(x, pos), reads)
+            reads = all_reads[reads]
+            images = map(x->encode_read(x, pos), reads)
 
-        mut, freq = let counter = fill(0, 6)
-            for i in images
-                mut = findfirst(i[32, 1:4])
-                if mut == 0
-                    counter[6] += i[32, 6] != 0
-                elseif i[32, mut+6] == 0.
-                    counter[mut] += 1
+            mut, freq = let counter = fill(0, 6)
+                for i in images
+                    mut = findfirst(i[32, 1:4])
+                    if mut == 0
+                        counter[6] += i[31, 6] == 0 && i[32, 6] != 0
+                    elseif i[32, mut+6] == 0.
+                        counter[mut] += 1
+                    end
+                    if i[33, 5] != 0.
+                       counter[5] += 1
+                    end
                 end
-                if i[33, 5] != 0.
-                   counter[5] += 1
-                end
+                support, mut = findmax(counter)
+                support == 0 && continue
+                "ATCG+-"[mut], support / depth
             end
-            support, mut = findmax(counter)
-            support == 0 && continue
-            b"ATCG+-"[mut], support / depth
+
+            # randomly drop some "easy" samples to save time and memory
+            freq < 0.02 && continue
+            freq > 0.48 && continue
+            freq < 0.06 && genotype == 0 && rand() < .99 && continue
+            freq > 0.24 && genotype == 1 && rand() < .80 && continue
+
+            foreach(image->write(out_image, image), images)
+            prt(out_txt, chr, pos, mut, genotype, freq, depth)
         end
-
-        # randomly drop some "easy" samples to save time and memory
-        freq < 0.01 && genotype == 0 && rand() < .99 && continue
-        freq > 0.24 && genotype == 1 && rand() < .80 && continue
-
-        foreach(image->write(out_image, image), images)
-        prt(out_txt, chr, pos, mut, genotype, freq, depth)
     end
 
-    prt(STDERR, now(), taskname, "done"); flush(STDERR)
+    prt(STDERR, now(), "done")
 end
