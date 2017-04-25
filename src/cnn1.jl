@@ -37,7 +37,7 @@ end
 
 const callbacks = [Keras.ModelCheckpoint("cnn1_weight.{epoch:02d}-{val_acc:.4f}.h5", monitor="val_acc", save_weights_only=true)]
 
-const phase_one = readdir(".") ~ filter(x->startswith(x, "cnn1.weight.14"))
+const phase_one = readdir(".") ~ filter(x->startswith(x, "cnn1_weight.14"))
 
 function prepare_data()
     images  = readdir(".") ~ filter(x->endswith(x, ".image")) ~ map(i"1:end-6")
@@ -90,11 +90,11 @@ end
 
     prt(STDERR, now(), "start training")
     if !isempty(phase_one)
-        model[:compile](Keras.SGD(lr=.002, momentum=.95), "binary_crossentropy", metrics=["accuracy"])
+        model[:compile](Keras.SGD(lr=1e-3, decay=1e-4), "binary_crossentropy", metrics=["accuracy"])
         model[:load_weights](phase_one[])
-        model[:fit](X, y, batch_size=64, nb_epoch=20, validation_split=.01, callbacks=callbacks, initial_epoch=15)
+        model[:fit](X, y, batch_size=256, nb_epoch=30, validation_split=.01, callbacks=callbacks, initial_epoch=20)
     else
-        model[:compile](Keras.SGD(lr=.005, momentum=.9), "binary_crossentropy", metrics=["accuracy"])
-        model[:fit](X, y, batch_size=64, nb_epoch=15, validation_split=.01, callbacks=callbacks)
+        model[:compile](Keras.Adagrad(lr=.01), "binary_crossentropy", metrics=["accuracy"])
+        model[:fit](X, y, batch_size=64, nb_epoch=20, validation_split=.01, callbacks=callbacks)
     end
 end

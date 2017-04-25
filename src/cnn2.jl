@@ -12,10 +12,11 @@ const model = let
     input = Keras.Input(shape=(256, 64, 10))
 
     output = input |>
-        Keras.Convolution2D(64, 64, 1, activation="relu", border_mode="valid") |>
-        Keras.Convolution2D(64,  1, 1, activation="relu", border_mode="valid") |>
-        Keras.Convolution2D(64,  1, 5, activation="relu", border_mode="same")  |>
-        Keras.MaxPooling2D((1, 4), strides=(1, 4)) |>
+        Keras.Convolution2D(256, 64, 1, activation="relu", border_mode="valid") |>
+        Keras.Convolution2D(128,  1, 1, activation="relu", border_mode="valid") |>
+        Keras.Convolution2D(64, 1, 1, activation="relu", border_mode="valid") |>
+        Keras.Convolution2D(32, 1, 1, activation="relu", border_mode="valid") |>
+        Keras.Convolution2D(16, 1, 1, activation="relu", border_mode="valid") |>
         Keras.Flatten() |>
         Keras.Dense(256, activation="sigmoid") |>
         Keras.Dense(1, activation="sigmoid")
@@ -25,7 +26,7 @@ end
 
 const callbacks = [Keras.ModelCheckpoint("cnn2_weight.{epoch:02d}-{val_acc:.4f}.h5", monitor="val_acc", save_weights_only=true)]
 
-const phase_one = readdir(".") ~ filter(x->startswith(x, "cnn2.weight.14"))
+const phase_one = readdir(".") ~ filter(x->startswith(x, "cnn2_weight.19"))
 
 function prepare_data()
     images  = readdir(".") ~ filter(x->endswith(x, ".image")) ~ map(i"1:end-6")
@@ -78,11 +79,11 @@ end
 
     prt(STDERR, now(), "start training")
     if !isempty(phase_one)
-        model[:compile](Keras.SGD(lr=.002, momentum=.95), "binary_crossentropy", metrics=["accuracy"])
+        model[:compile](Keras.SGD(lr=1e-3, decay=1e-4), "binary_crossentropy", metrics=["accuracy"])
         model[:load_weights](phase_one[])
-        model[:fit](X, y, batch_size=64, nb_epoch=20, validation_split=.01, callbacks=callbacks, initial_epoch=15)
+        model[:fit](X, y, batch_size=256, nb_epoch=30, validation_split=.01, callbacks=callbacks, initial_epoch=20)
     else
-        model[:compile](Keras.SGD(lr=.005, momentum=.9), "binary_crossentropy", metrics=["accuracy"])
-        model[:fit](X, y, batch_size=64, nb_epoch=15, validation_split=.01, callbacks=callbacks)
+        model[:compile](Keras.Adagrad(lr=.01), "binary_crossentropy", metrics=["accuracy"])
+        model[:fit](X, y, batch_size=64, nb_epoch=20, validation_split=.01, callbacks=callbacks)
     end
 end
