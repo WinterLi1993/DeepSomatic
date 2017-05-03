@@ -12,21 +12,21 @@ const model = let
     input = Keras.Input(shape=(256, 64, 10))
 
     output = input |>
-        Keras.Convolution2D(256, 64, 1, activation="relu", border_mode="valid") |>
-        Keras.Convolution2D(128,  1, 1, activation="relu", border_mode="valid") |>
-        Keras.Convolution2D(64, 1, 1, activation="relu", border_mode="valid") |>
-        Keras.Convolution2D(32, 1, 1, activation="relu", border_mode="valid") |>
-        Keras.Convolution2D(16, 1, 1, activation="relu", border_mode="valid") |>
+        Keras.Convolution2D(96, (1, 64), activation="relu", padding="valid") |>
+        Keras.Convolution2D(80,  (1, 1), activation="relu", padding="valid") |>
+        Keras.Convolution2D(64,  (1, 1), activation="relu", padding="valid") |>
+        Keras.Convolution2D(48,  (1, 1), activation="relu", padding="valid") |>
+        Keras.Convolution2D(32,  (1, 1), activation="relu", padding="valid") |>
         Keras.Flatten() |>
         Keras.Dense(256, activation="sigmoid") |>
         Keras.Dense(1, activation="sigmoid")
 
-    Keras.Model(input=input, output=output)
+    Keras.Model(inputs=[input], outputs=[output])
 end
 
-const callbacks = [Keras.ModelCheckpoint("cnn2_weight.{epoch:02d}-{val_acc:.4f}.h5", monitor="val_acc", save_weights_only=true)]
+const callbacks = [Keras.ModelCheckpoint("model2_weight.{epoch:02d}-{val_acc:.4f}.h5", monitor="val_acc")]
 
-const phase_one = readdir(".") ~ filter(x->startswith(x, "cnn2_weight.19"))
+const phase_one = readdir(".") ~ filter(x->startswith(x, "model2_weight.19"))
 
 function prepare_data()
     images  = readdir(".") ~ filter(x->endswith(x, ".image")) ~ map(i"1:end-6")
@@ -59,7 +59,7 @@ function prepare_data()
     X = [map(car, results)...;]
     y = [map(cadr, results)...;]
 
-    h5open("cnn2_data.h5", "w") do f
+    h5open("model2_data.h5", "w") do f
         write(f, "X", X)
         write(f, "y", y)
     end
@@ -68,8 +68,8 @@ function prepare_data()
 end
 
 @main function train()
-    if isfile("cnn2_data.h5")
-        X, y = h5open("cnn2_data.h5") do f
+    if isfile("model2_data.h5")
+        X, y = h5open("model2_data.h5") do f
             read(f, "X"), read(f, "y")
         end
     else
@@ -81,9 +81,9 @@ end
     if !isempty(phase_one)
         model[:compile](Keras.SGD(lr=1e-3, decay=1e-4), "binary_crossentropy", metrics=["accuracy"])
         model[:load_weights](phase_one[])
-        model[:fit](X, y, batch_size=256, nb_epoch=30, validation_split=.01, callbacks=callbacks, initial_epoch=20)
+        model[:fit](X, y, batch_size=256, epochs=30, validation_split=.01, callbacks=callbacks, initial_epoch=20)
     else
-        model[:compile](Keras.Adagrad(lr=.01), "binary_crossentropy", metrics=["accuracy"])
-        model[:fit](X, y, batch_size=64, nb_epoch=20, validation_split=.01, callbacks=callbacks)
+        model[:compile](Keras.SGD(lr=2e-3, momentum=.95), "binary_crossentropy", metrics=["accuracy"])
+        model[:fit](X, y, batch_size=64, epochs=20, validation_split=.01, callbacks=callbacks)
     end
 end

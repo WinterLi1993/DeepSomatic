@@ -29,8 +29,16 @@ using Fire
     freqs = freqs[ind]
     genos = genos[ind]
     cutoff = findmax(cumsum(.5 .- genos)) |> cadr
-    residual = sum(1 - genos[1:cutoff]) + sum(genos[cutoff+1:end])
-    prt(freqs[cutoff], residual / length(ind), sum(genos) / length(genos))
+    correct = sum(1 - genos[1:cutoff]) + sum(genos[cutoff+1:end])
+    println("""
+        best cutoff frequency: $(freqs[cutoff])
+        best accuracy of cutoff: $(correct / length(ind))
+        contingency table:
+        \t\thigh freq \tlow freq \tsum
+        germline\t$(sum(genos[cutoff+1:end]))  \t\t$(sum(genos[1:cutoff])) \t\t$(sum(genos))
+        somatic \t$(length(genos[cutoff+1:end])-sum(genos[cutoff+1:end]))  \t\t$(cutoff-sum(genos[1:cutoff])) \t\t$(length(genos)-sum(genos))
+        sum     \t$(length(genos[cutoff+1:end]))  \t\t$cutoff \t\t$(length(genos))
+        """)
 end
 
 @main function clean()
@@ -50,6 +58,8 @@ end
         for line in eachline(txt)
             x = split(line)
             length(x) != 6 && break
+
+            depth = parse(Int, x[6])
 
             try
                 imageout << read(image, sizeof(f32) * 64 * 10 * depth)
