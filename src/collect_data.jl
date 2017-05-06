@@ -8,7 +8,6 @@ using BioDataStructures
 using Fire
 using Falcon
 using HDF5
-using Libz
 
 function most_significant_mut_count(seq)
     i, counter = 1, fill(0, 6) # ATCGID

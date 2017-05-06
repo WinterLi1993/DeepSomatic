@@ -32,7 +32,11 @@ using PyCall
 @pyimport keras.callbacks as callbacks
 @pyimport keras.backend as K
 
-const Model = models.Model
+for model in (:Model, :load_model)
+    @eval begin
+        const $model = models.$model
+    end
+end
 
 for layer in (
     :Activation, :ActivityRegularization, :AtrousConv2D, :AtrousConvolution2D, :AveragePooling1D, :AveragePooling2D, :AveragePooling3D,
