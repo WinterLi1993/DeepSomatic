@@ -17,18 +17,18 @@ const model = let
         Keras.Convolution2D(16, (1, 3), activation="relu", padding="same") |>
         Keras.MaxPooling2D((1, 3), strides=(1, 3)) |>
         Keras.Convolution2D(32, (1, 5), activation="relu", padding="same") |>
+        Keras.Convolution2D(32, (1, 5), activation="relu", padding="same") |>
         Keras.MaxPooling2D((1, 3), strides=(1, 3)) |>
         Keras.Convolution2D(32, (1, 7), activation="relu", padding="valid")
 
     fc = input1 |>
-        Keras.Convolution2D(64, (1, 63), activation="relu", padding="valid") |>
-        Keras.Convolution2D(32,  (1, 1), activation="relu", padding="valid")
+        Keras.Convolution2D(32, (1, 63), activation="relu", padding="valid")
 
     res = [conv, fc, input2] |>
         Keras.Concatenate(3) |>
-        Keras.Convolution2D(32, (1, 1), activation="relu", padding="same") |>
-        Keras.Flatten() |>
-        Keras.Dense(30, activation="sigmoid")
+        Keras.Convolution2D(64, (1, 1), activation="relu", padding="same") |>
+        Keras.AveragePooling2D((256, 1), strides=(256, 1)) |>
+        Keras.Flatten()
 
     output = [res, input3] |>
         Keras.Concatenate(1) |>
@@ -38,9 +38,9 @@ const model = let
     Keras.Model(inputs=[input1, input2, input3], outputs=[output])
 end
 
-const callbacks = [Keras.ModelCheckpoint("model3_weight.{epoch:02d}-{val_acc:.4f}.h5", monitor="val_acc")]
+const callbacks = [Keras.ModelCheckpoint("model2_weight.{epoch:02d}-{val_acc:.4f}.h5", monitor="val_acc")]
 
-const phase_one = readdir(".") ~ filter(x->startswith(x, "model3_weight.19"))
+const phase_one = readdir(".") ~ filter(x->startswith(x, "model2_weight.14"))
 
 function prepare_data()
     images  = readdir(".") ~ filter(x->endswith(x, ".image")) ~ map(i"1:end-6")
@@ -76,7 +76,7 @@ function prepare_data()
     X3 = [map(i"3", results)...;]
     y  = [map(i"4", results)...;]
 
-    h5open("model3_data.h5", "w") do f
+    h5open("model2_data.h5", "w") do f
         write(f, "X1", X1)
         write(f, "X2", X2)
         write(f, "X3", X3)
@@ -87,8 +87,8 @@ function prepare_data()
 end
 
 @main function train()
-    if isfile("model3_data.h5")
-        X1, X2, X3, y = h5open("model3_data.h5") do f
+    if isfile("model2_data.h5")
+        X1, X2, X3, y = h5open("model2_data.h5") do f
             read(f, "X1"), read(f, "X2"), read(f, "X3"), read(f, "y")
         end
     else
@@ -100,9 +100,9 @@ end
     if !isempty(phase_one)
         model[:compile](Keras.SGD(lr=1e-3, decay=1e-4), "binary_crossentropy", metrics=["accuracy"])
         model[:load_weights](phase_one[])
-        model[:fit]([X1, X2, X3], y, batch_size=256, epochs=30, validation_split=.01, callbacks=callbacks, initial_epoch=20)
+        model[:fit]([X1, X2, X3], y, batch_size=256, epochs=20, validation_split=.02, callbacks=callbacks, initial_epoch=15)
     else
         model[:compile](Keras.SGD(lr=2e-3, momentum=.95), "binary_crossentropy", metrics=["accuracy"])
-        model[:fit]([X1, X2, X3], y, batch_size=64, epochs=20, validation_split=.01, callbacks=callbacks)
+        model[:fit]([X1, X2, X3], y, batch_size=64, epochs=15, validation_split=.02, callbacks=callbacks)
     end
 end

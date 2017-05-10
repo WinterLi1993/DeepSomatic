@@ -8,9 +8,8 @@ using OhMyJulia
 using BioDataStructures
 using Fire
 using Falcon
-using HDF5
 using Keras
-using Libz
+using StatsBase
 
 const base_code = b"NATCG"
 
@@ -96,11 +95,12 @@ function encode_read(read, center)
 end
 
 function load_bam(bam)
-    reads = collect(BamLoader(bam))
+    bam = BamLoader(bam)
+    reads = collect(bam)
     index = Dict{String, IntRangeDict{i32, i32}}()
-    chr = -2
+    chr = i32(-2)
     local dict::IntRangeDict{i32, i32}
-    for (idx, read) in enumerate(bam) @when read.refID >= 0
+    for (idx, read) in enumerate(reads) @when read.refID >= 0
         if read.refID != chr
             chr = read.refID
             index[bam.refs[chr+1] |> car] = dict = IntRangeDict{i32, i32}()
@@ -121,14 +121,16 @@ function load_pileup(pileup)
         chr = line[1]
         pos = parse(i32, line[2])
         depth = parse(i32, line[4])
-        freq  = depth < 20 ? -1. : let i, counter = 1, fill(0, 6) # ATCGID
-            while i < length(seq)
-                c = uppercase(seq[i])
+        depth == 0 && continue
+        freq  = let
+            i, counter = 1, fill(0, 6) # ATCGID
+            while i < length(line[5])
+                c = uppercase(line[5][i])
                 m = findfirst("ATCG+-", c)
 
                 if m > 4
                     counter[m] += 1
-                    len, i = parse(seq, i+1, greedy=false)
+                    len, i = parse(line[5], i+1, greedy=false)
                     i += len
                 elseif m > 0
                     counter[m] += 1
@@ -148,9 +150,8 @@ function load_pileup(pileup)
 end
 
 function load_model(model)
-    f = startswith(model, "model1") ? prepare_data1 :
-        startswith(model, "model2") ? prepare_data2 :
-        startswith(model, "model3") ? prepare_data3 :
+    f = contains(model, "model1") ? prepare_data1 :
+        contains(model, "model2") ? prepare_data2 :
         error("unknown model")
     Keras.load_model(model), f
 end
@@ -196,42 +197,111 @@ function prepare_data2(reads, indices, pos)
         images = sample(images, 256, replace=false, ordered=true)
     end
 
-    for i in images
-        image[1, i, :, :] = i
+    image = Array{f32}(1, 256, 64, 10)
+
+    for (i, img) in enumerate(images)
+        image[1, i, :, :] = img
     end
 
     image[1, depth+1:end, :, :] = 0.
 
-    [image[1, :, 1:63, :], image[1, :, [64], :], [freq min(depth, 2048)/2048]]
+    [image[[1], :, 1:63, :], image[[1], :, [64], :], [freq min(depth, 2048)/2048]]
 end
 
-@main funciton predict(model, bam, vcf)
-    reads, index   = load_bam(bam)
+function best_cut(y, ŷ)
+    ind = sortperm(ŷ)
+    y = y[ind]
+    cutoff = findmax(cumsum(.5 .- y)) |> cadr
+    correct = sum(1 - y[1:cutoff]) + sum(y[cutoff+1:end])
+    ŷ[ind[cutoff]], correct / length(y)
+end
+
+function auc(y, ŷ, cut)
+    T = y .== 1
+    F = !T
+
+    last = 0., 0.
+
+    points = map([0:.001:.019; .02:.01:.98; .981:.001:1]) do i
+        P  = ŷ .> i
+        TP = sum(T & P) / sum(T)
+        FP = sum(F & P) / sum(F)
+
+        if i >= cut
+            cut = 2
+            @printf(STDERR, "%.4f, %.4f *\n", FP, TP)
+        elseif last != (FP, TP)
+            last = FP, TP
+            @printf(STDERR, "%.4f, %.4f\n", FP, TP)
+        end
+    end
+end
+
+@main function predict(model, bam, vcf)
+    STDERR << now() << " - loading bam" << '\n'
+    reads, index = load_bam(bam)
+
+    STDERR << now() << " - loading model" << '\n'
     model, prepare = load_model(model)
 
+    STDERR << now() << " - start predicting" << '\n'
     for line in eachline(split, vcf)
         pos = try parse(i32, line[2]) catch prt(line...); continue end
-        chr = line[1]
-        if chr in keys(index) && length(rs = index[chr][pos]) >= 64
-            prt(line..., model[:predict_on_batch](prepare(reads, rs, pos))[1])
-        else
+        depth = parse(i32, split(line[end], ':')[3])
+        freq  = parse(f32, split(line[end], ':')[6][1:end-1])
+        if depth < 64 || freq < 2 || freq > 48
             prt(line..., '.')
+            continue
         end
+        rs = index[line[1]][pos]
+        prt(line..., model[:predict_on_batch](prepare(reads, rs, pos))[1])
     end
 end
 
 @main function evaluate(model, bam, vcf, pileup)
-    reads, index   = load_bam(bam)
+    STDERR << now() << " - loading bam" << '\n'
+    reads, index = load_bam(bam)
+
+    STDERR << now() << " - loading model" << '\n'
     model, prepare = load_model(model)
+
+    STDERR << now() << " - loading gDNA" << '\n'
     gDNA = load_pileup(pileup)
 
+    truth, pred, fpred = f32[], f32[], f32[]
+
+    STDERR << now() << " - start evaluating" << '\n'
     for line in eachline(split, vcf)
         pos = try parse(i32, line[2]) catch prt(line...); continue end
         chr = line[1]
-        if chr in keys(index) && length(rs = index[chr][pos]) >= 64
-            prt(line..., model[:predict_on_batch](prepare(reads, rs, pos))[1])
+        depth = parse(i32, split(line[end], ':')[3])
+        freq  = parse(f32, split(line[end], ':')[6][1:end-1]) / 100
+
+        p = depth < 64 ? '.' :
+            freq < .02 ? 0. :
+            freq > .48 ? 1. :
+            model[:predict_on_batch](prepare(reads, index[chr][pos], pos))[1]
+
+        gd, gf = if (chr, pos) in keys(gDNA)
+            d, f = gDNA[(chr, pos)]
+            d >= 20 ? (d,f) : (d,'.')
         else
-            prt(line..., '.')
+            '.', '.'
+        end
+
+        prt(line..., gd, gf, p)
+
+        if gf != '.' && !(.01 <= gf <= .24) && p != '.'
+            push!(truth, gf > .24 ? 1 : 0)
+            push!(pred,  p)
+            push!(fpred, freq)
         end
     end
+
+    STDERR << now() << " - start analysis" << '\n'
+    cutoff, acc = best_cut(truth, pred)
+    fcut, facc  = best_cut(truth, fpred)
+    prt(STDERR, cutoff, acc)
+    prt(STDERR, fcut, facc)
+    auc(truth, pred, cutoff)
 end
