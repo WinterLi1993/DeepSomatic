@@ -160,6 +160,7 @@ function prepare_data1(reads, indices, pos)
     depth = length(indices)
     if depth > 256
         indices = sample(indices, 256, replace=false) |> sort
+        depth = 256
     end
 
     data = Array{f32}(1, 256, 64, 10)
@@ -222,7 +223,7 @@ function auc(y, ŷ, cut)
 
     last = 0., 0.
 
-    points = map([0:.001:.019; .02:.01:.98; .981:.001:1]) do i
+    points = map([0:.0001:.019; .02:.01:.98; .981:.0001:1]) do i
         P  = ŷ .> i
         TP = sum(T & P) / sum(T)
         FP = sum(F & P) / sum(F)
@@ -234,7 +235,17 @@ function auc(y, ŷ, cut)
             last = FP, TP
             @printf(STDERR, "%.4f, %.4f\n", FP, TP)
         end
+
+        FP, TP
     end
+
+    ∫ = map(1:length(points)) do i
+        x1, y1 = i == 1 ? (1.,1.) : points[i-1]
+        x2, y2 = points[i]
+        (x1 - x2) * (y1 + y2) / 2
+    end
+
+    sum(∫)
 end
 
 @main function predict(model, bam, vcf)
@@ -303,5 +314,5 @@ end
     fcut, facc  = best_cut(truth, fpred)
     prt(STDERR, cutoff, acc)
     prt(STDERR, fcut, facc)
-    auc(truth, pred, cutoff)
+    prt(STDERR, auc(truth, pred, cutoff))
 end
